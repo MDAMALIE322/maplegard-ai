@@ -1,0 +1,16 @@
+# Large data files
+data/fraudTrain.csv
+data/fraudTest.csv
+data/output/
+data/models/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Docker
+*.log
