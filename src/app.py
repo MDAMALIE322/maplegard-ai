@@ -5,13 +5,11 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import time
-import os
 
 # Page configuration
 st.set_page_config(
     page_title="MapleGuard AI - Fraud Detection",
-    page_icon="shield",
+    page_icon="🛡️",
     layout="wide"
 )
 
@@ -24,40 +22,49 @@ st.markdown("""
         padding: 20px;
         text-align: center;
     }
-    .fraud-row { background-color: rgba(239, 68, 68, 0.1); }
-    .section-title {
-        font-size: 1.2rem;
-        font-weight: 600;
-        margin-bottom: 10px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 
-# Loading data
+# Loading sample data for demo
 @st.cache_data
 def load_data():
-    # Loading batch metrics
-    metrics_path = "/app/data/output/batch_metrics.csv"
-    if os.path.exists(metrics_path):
-        metrics_df = pd.read_csv(metrics_path)
-    else:
-        metrics_df = pd.DataFrame()
+    np.random.seed(42)
+    n = 1000
 
-    # Loading sample of scored transactions from parquet
-    parquet_path = "/app/data/output/fraud_scored"
-    if os.path.exists(parquet_path):
-        files = [
-            os.path.join(parquet_path, f)
-            for f in os.listdir(parquet_path)
-            if f.endswith(".parquet")
-        ]
-        if files:
-            df = pd.read_parquet(files[0])
-        else:
-            df = pd.DataFrame()
-    else:
-        df = pd.DataFrame()
+    categories = [
+        "shopping_net", "misc_net", "grocery_net",
+        "entertainment", "gas_transport",
+        "grocery_pos", "misc_pos", "food_dining"
+    ]
+    merchants = [
+        "fraud_Hills-Witting", "fraud_Gleason",
+        "fraud_Ruecker Group", "fraud_Smith LLC",
+        "fraud_Jones Corp", "fraud_Brown Inc"
+    ]
+
+    df = pd.DataFrame({
+        "trans_num":            [f"TXN{i:08d}" for i in range(n)],
+        "merchant":             np.random.choice(merchants, n),
+        "category":             np.random.choice(categories, n),
+        "amt":                  np.round(np.random.exponential(150, n), 2),
+        "hour":                 np.random.randint(0, 24, n),
+        "is_night":             np.random.randint(0, 2, n),
+        "is_weekend":           np.random.randint(0, 2, n),
+        "distance_km":          np.round(np.random.uniform(0, 300, n), 2),
+        "risk_score":           np.round(np.random.beta(2, 8, n), 2),
+        "rule_predicted_fraud": np.random.choice([0, 1], n, p=[0.85, 0.15]),
+        "is_fraud":             np.random.choice([0, 1], n, p=[0.994, 0.006]),
+    })
+
+    metrics_df = pd.DataFrame({
+        "batch_id":       range(1, 21),
+        "records":        [500] * 20,
+        "fraud_detected": np.random.randint(10, 200, 20),
+        "actual_fraud":   np.random.randint(0, 15, 20),
+        "processing_ms":  np.round(np.random.uniform(0.1, 0.5, 20), 2),
+        "throughput_rps": [500000] * 20
+    })
 
     return df, metrics_df
 
@@ -169,7 +176,11 @@ with tab1:
             x=hours, y=fraud_counts,
             name="Fraud", marker_color="#ef4444"
         ))
-        fig3.update_layout(barmode="overlay", xaxis_title="Hour", yaxis_title="Count")
+        fig3.update_layout(
+            barmode="overlay",
+            xaxis_title="Hour",
+            yaxis_title="Count"
+        )
         st.plotly_chart(fig3, use_container_width=True)
 
     with col_d:
@@ -195,27 +206,19 @@ with tab2:
     st.markdown("## Live Transaction Feed")
     st.markdown("Simulating Kafka consumer reading transactions in real time.")
 
-    if not df.empty:
-        sample = df.sample(min(100, len(df))).copy()
-        sample["status"] = sample["rule_predicted_fraud"].apply(
-            lambda x: "FRAUD" if x == 1 else "LEGIT"
-        )
+    sample = df.sample(min(100, len(df))).copy()
 
-        display_cols = [
-            c for c in [
-                "trans_num", "merchant", "category",
-                "amt", "hour", "risk_score",
-                "rule_predicted_fraud", "is_fraud"
-            ] if c in sample.columns
-        ]
+    display_cols = [
+        "trans_num", "merchant", "category",
+        "amt", "hour", "risk_score",
+        "rule_predicted_fraud", "is_fraud"
+    ]
 
-        st.dataframe(
-            sample[display_cols].sort_values("risk_score", ascending=False),
-            use_container_width=True,
-            height=500
-        )
-    else:
-        st.info("Run the notebook pipeline first to generate transaction data.")
+    st.dataframe(
+        sample[display_cols].sort_values("risk_score", ascending=False),
+        use_container_width=True,
+        height=500
+    )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -228,55 +231,49 @@ with tab2:
 with tab3:
     st.markdown("## Fraud Alerts Panel")
 
-    if not df.empty and "rule_predicted_fraud" in df.columns:
-        alerts = df[df["rule_predicted_fraud"] == 1] \
-            .sort_values("risk_score", ascending=False) \
-            .head(50)
+    alerts = df[df["rule_predicted_fraud"] == 1] \
+        .sort_values("risk_score", ascending=False) \
+        .head(50)
 
-        st.markdown(f"**{len(alerts)} alerts** in current dataset sample")
-        st.divider()
+    st.markdown(f"**{len(alerts)} alerts** in current dataset sample")
+    st.divider()
 
-        for _, row in alerts.head(20).iterrows():
-            score = float(row.get("risk_score", 0))
+    for _, row in alerts.head(20).iterrows():
+        score = float(row.get("risk_score", 0))
 
-            if score >= 0.75:
-                label = "CRITICAL"
-                color = "#ef4444"
-            elif score >= 0.50:
-                label = "HIGH"
-                color = "#f97316"
-            else:
-                label = "MEDIUM"
-                color = "#eab308"
+        if score >= 0.75:
+            label = "CRITICAL"
+        elif score >= 0.50:
+            label = "HIGH"
+        else:
+            label = "MEDIUM"
 
-            with st.expander(
-                f"{label} | ${row.get('amt', 0):.2f} at "
-                f"{row.get('merchant', 'Unknown')} | Score: {score:.2f}"
-            ):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f"**Amount:** ${row.get('amt', 0):.2f}")
-                    st.markdown(f"**Category:** {row.get('category', 'N/A')}")
-                with col2:
-                    st.markdown(f"**Hour:** {int(row.get('hour', 0)):02d}:00")
-                    st.markdown(f"**Night flag:** {int(row.get('is_night', 0))}")
-                with col3:
-                    st.markdown(f"**Risk Score:** {score:.4f}")
-                    st.markdown(f"**Actual Fraud:** {int(row.get('is_fraud', 0))}")
+        with st.expander(
+            f"{label} | ${row.get('amt', 0):.2f} at "
+            f"{row.get('merchant', 'Unknown')} | Score: {score:.2f}"
+        ):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f"**Amount:** ${row.get('amt', 0):.2f}")
+                st.markdown(f"**Category:** {row.get('category', 'N/A')}")
+            with col2:
+                st.markdown(f"**Hour:** {int(row.get('hour', 0)):02d}:00")
+                st.markdown(f"**Night flag:** {int(row.get('is_night', 0))}")
+            with col3:
+                st.markdown(f"**Risk Score:** {score:.4f}")
+                st.markdown(f"**Actual Fraud:** {int(row.get('is_fraud', 0))}")
 
-                st.markdown("**Why flagged:**")
-                if row.get("amt", 0) > 1000:
-                    st.markdown("- High transaction amount (> $1,000)")
-                if row.get("is_night", 0) == 1:
-                    st.markdown("- Night transaction (midnight to 4am)")
-                if row.get("distance_km", 0) > 100:
-                    st.markdown("- Large distance between cardholder and merchant")
-                if row.get("is_weekend", 0) == 1:
-                    st.markdown("- Weekend transaction")
-                if row.get("category", "") in ["shopping_net", "misc_net", "grocery_net"]:
-                    st.markdown("- High risk merchant category")
-    else:
-        st.info("Run the notebook pipeline first to generate alert data.")
+            st.markdown("**Why flagged:**")
+            if row.get("amt", 0) > 1000:
+                st.markdown("- High transaction amount (> $1,000)")
+            if row.get("is_night", 0) == 1:
+                st.markdown("- Night transaction (midnight to 4am)")
+            if row.get("distance_km", 0) > 100:
+                st.markdown("- Large distance between cardholder and merchant")
+            if row.get("is_weekend", 0) == 1:
+                st.markdown("- Weekend transaction")
+            if row.get("category", "") in ["shopping_net", "misc_net", "grocery_net"]:
+                st.markdown("- High risk merchant category")
 
 
 # Tab 4 - Model Comparison
@@ -290,15 +287,14 @@ with tab4:
             "Random Forest (Train)",
             "Random Forest (Test)"
         ],
-        "ROC-AUC": ["-", "0.8903", "0.9925", "0.9876"],
-        "Accuracy": ["-", "0.9940", "0.9979", "0.9983"],
-        "Precision": ["0.0166", "0.9886", "0.9978", "0.9982"],
-        "Recall": ["0.3243", "0.9940", "0.9979", "0.9983"],
+        "ROC-AUC":  ["-",      "0.8903", "0.9925", "0.9876"],
+        "Accuracy": ["-",      "0.9940", "0.9979", "0.9983"],
+        "Precision":["0.0166", "0.9886", "0.9978", "0.9982"],
+        "Recall":   ["0.3243", "0.9940", "0.9979", "0.9983"],
         "F1 Score": ["0.0317", "0.9913", "0.9978", "0.9982"]
     })
 
     st.table(results)
-
     st.divider()
 
     col_a, col_b = st.columns(2)
@@ -310,9 +306,9 @@ with tab4:
             y=[0.0317, 0.9913, 0.9978],
             color=["Rule-Based", "Logistic Regression", "Random Forest"],
             color_discrete_map={
-                "Rule-Based": "#ef4444",
+                "Rule-Based":          "#ef4444",
                 "Logistic Regression": "#3b82f6",
-                "Random Forest": "#22c55e"
+                "Random Forest":       "#22c55e"
             },
             labels={"x": "Model", "y": "F1 Score"}
         )
@@ -352,8 +348,8 @@ with tab4:
     st.markdown("""
     - Random Forest achieved ROC-AUC of 0.9925 on training data and 0.9876 on unseen test data, confirming strong generalization.
     - Merchant category and transaction amount account for over 56% of feature importance combined.
-    - Rule-based scoring captured 32% of fraud but generated excessive false positives at 143,798.
-    - The near-identical train and test performance confirms no overfitting.
+    - Rule-based scoring captured 32% of fraud but generated 143,798 false positives.
+    - Near-identical train and test performance confirms no overfitting.
     """)
 
 
@@ -362,51 +358,43 @@ with tab5:
     st.markdown("## Batch Processing Metrics")
     st.markdown("Simulating Apache Spark Structured Streaming micro-batch execution.")
 
-    if not metrics_df.empty:
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Batches", len(metrics_df))
-        with col2:
-            st.metric("Total Records", f"{metrics_df['records'].sum():,}")
-        with col3:
-            st.metric("Avg Latency", f"{metrics_df['processing_ms'].mean():.2f} ms")
-        with col4:
-            st.metric("Avg Throughput", f"{metrics_df['throughput_rps'].mean():,.0f} rec/s")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Batches", len(metrics_df))
+    with col2:
+        st.metric("Total Records", f"{metrics_df['records'].sum():,}")
+    with col3:
+        st.metric("Avg Latency", f"{metrics_df['processing_ms'].mean():.2f} ms")
+    with col4:
+        st.metric("Avg Throughput", f"{metrics_df['throughput_rps'].mean():,.0f} rec/s")
 
-        st.divider()
+    st.divider()
 
-        col_a, col_b = st.columns(2)
+    col_a, col_b = st.columns(2)
 
-        with col_a:
-            st.markdown("#### Fraud Detected per Batch")
-            fig7 = px.line(
-                metrics_df,
-                x="batch_id",
-                y="fraud_detected",
-                markers=True,
-                color_discrete_sequence=["#ef4444"],
-                labels={"batch_id": "Batch ID", "fraud_detected": "Fraud Detected"}
-            )
-            st.plotly_chart(fig7, use_container_width=True)
+    with col_a:
+        st.markdown("#### Fraud Detected per Batch")
+        fig7 = px.line(
+            metrics_df,
+            x="batch_id",
+            y="fraud_detected",
+            markers=True,
+            color_discrete_sequence=["#ef4444"],
+            labels={"batch_id": "Batch ID", "fraud_detected": "Fraud Detected"}
+        )
+        st.plotly_chart(fig7, use_container_width=True)
 
-        with col_b:
-            st.markdown("#### Processing Latency per Batch")
-            fig8 = px.line(
-                metrics_df,
-                x="batch_id",
-                y="processing_ms",
-                markers=True,
-                color_discrete_sequence=["#3b82f6"],
-                labels={"batch_id": "Batch ID", "processing_ms": "Latency (ms)"}
-            )
-            st.plotly_chart(fig8, use_container_width=True)
-
-        st.divider()
-        st.markdown("#### Raw Batch Log")
-        st.dataframe(metrics_df, use_container_width=True)
-
-    else:
-        st.info("Run the notebook pipeline first to generate batch metrics.")
+    with col_b:
+        st.markdown("#### Processing Latency per Batch")
+        fig8 = px.line(
+            metrics_df,
+            x="batch_id",
+            y="processing_ms",
+            markers=True,
+            color_discrete_sequence=["#3b82f6"],
+            labels={"batch_id": "Batch ID", "processing_ms": "Latency (ms)"}
+        )
+        st.plotly_chart(fig8, use_container_width=True)
 
     st.divider()
     st.markdown("#### Big Data Architecture Mapping")
